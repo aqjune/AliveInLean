@@ -44,6 +44,22 @@ def bop_isdiv : bopcode → bool
 inductive bopflag : Type
 | nsw | nuw | exact
 
+@[reducible]
+def bop_availflags : bopcode → list bopflag
+| bopcode.add := [bopflag.nsw, bopflag.nuw]
+| bopcode.sub := [bopflag.nsw, bopflag.nuw]
+| bopcode.mul := [bopflag.nsw, bopflag.nuw]
+| bopcode.shl := [bopflag.nsw, bopflag.nuw]
+| bopcode.udiv := [bopflag.exact]
+| bopcode.sdiv := [bopflag.exact]
+| bopcode.urem := [bopflag.exact]
+| bopcode.srem := [bopflag.exact]
+| bopcode.lshr := [bopflag.exact]
+| bopcode.ashr := [bopflag.exact]
+| bopcode.and := []
+| bopcode.or := []
+| bopcode.xor := []
+
 -- icmp operation
 inductive icmpcond : Type
 | eq | ne | ugt | uge | ult | ule | sgt | sge | slt | sle
