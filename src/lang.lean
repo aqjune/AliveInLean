@@ -75,10 +75,10 @@ inductive instruction : Type
           operand → operand → instruction
 | icmpop : ty → reg → icmpcond → operand →
            operand → instruction
-| selectop : reg → ty → operand → ty → operand →
+| selectop : reg → ty → operand → ty → operand → -- condty, opty
              operand → instruction
 | unaryop : reg → uopcode →
-            ty → operand → ty → instruction
+            ty → operand → ty → instruction -- fromty, toty
 
 -- program
 structure program : Type := 
