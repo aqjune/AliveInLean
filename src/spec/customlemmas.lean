@@ -1,6 +1,7 @@
 import ..lang
 import ..irsem
 import ..irsem_exec
+import .lemmas_basic
 import .lemmas
 
 open irsem_exec
@@ -33,7 +34,7 @@ def is_poison: irsem.valty irsem_exec → Prop
 set_option eqn_compiler.zeta true
 set_option pp.proofs true
 
-theorem proof_example1:
+lemma never_poison:
   ∀ isz name op1 op2 st st' val
     (HSTEP:step st (udiv isz name op1 op2) = some st')
     (HNOUB:¬ has_ub st')
