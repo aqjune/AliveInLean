@@ -210,7 +210,7 @@ def rand_selectop (retty:ty) (retvar:string) (g:std_gen)
 : vars_state (instruction × std_gen) :=
 do
   -- choose operand 1
-  (varname1, varty1, isfresh1, g) ← choose_or_newvar none g,
+  (varname1, varty1, isfresh1, g) ← choose_or_newvar retty g,
   -- choose operand 2
   -- operand 1 and 2 should have the same type
   (varname2, varty2, isfresh2, g) ← choose_or_newvar varty1 g,
@@ -368,9 +368,12 @@ def refines (final_st: irsem.irstate irsem_exec) (n exitcode:nat): bool :=
     end
 
 -- Runs a single test.
-def run_test (clangpath:string) (g:std_gen): io (bool × std_gen) :=
+def run_test (clangpath:string) (verbose:bool) (g:std_gen)
+: io (bool × std_gen) :=
+  let debug_ln (s:string):=
+    if verbose then io.print_ln s else return () in
   do
-  io.print_ln "---------------",
+  debug_ln "---------------",
   let (retty, g) := ty_new g,
   -- Create random instructions
   let ((insts, g), vr) :=
@@ -378,25 +381,25 @@ def run_test (clangpath:string) (g:std_gen): io (bool × std_gen) :=
           assign_constants insts g).run vars_record_empty,
   let freevars := vr.1.reverse,
   -- Print the instructions.
-  monad.foldl (λ _ inst, io.print_ln (to_string inst)) () insts,
+  monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
 
   -- Create a random initial state
   let (init_st, g) := freevar.create_init_state_exec freevars g,
-  io.print_ln "- Initial state",
-  io.print_ln (to_string init_st),
+  debug_ln "- Initial state",
+  debug_ln (to_string init_st),
 
   -- Get the result of it from Lean's semantics.
-  io.print_ln "- Final state",
+  debug_ln "- Final state",
   final_st ← print_result (irsem.bigstep_exe irsem_exec init_st ⟨insts⟩),
   match final_st with
   | none := do
-    io.print_ln "STUCK?",
+    debug_ln "Unreachable!",
     return (ff, g)
   | some final_st := do
     -- Generate LLVM IR
     let ircode := to_llvmir ⟨insts⟩ init_st freevars retty,
-    io.print_ln "- LLVM IR",
-    io.print_ln ircode,
+    debug_ln "- LLVM IR",
+    debug_ln ircode,
     -- store it to a temporary file
     let (tempn, g) := std_next g,
     let tempname := to_string (tempn % 10000),
@@ -405,7 +408,9 @@ def run_test (clangpath:string) (g:std_gen): io (bool × std_gen) :=
     io.fs.close handler,
     child ← io.proc.spawn {
       cmd := clangpath,
-      args := ["-o", (tempname ++ exec_extension), (tempname ++ ".ll")]
+      args := ["-o", (tempname ++ exec_extension),
+        "-Wno-override-module", -- suppress warning
+        (tempname ++ ".ll")]
     },
     cres ← io.proc.wait child,
     if cres = 0 then do
@@ -418,22 +423,23 @@ def run_test (clangpath:string) (g:std_gen): io (bool × std_gen) :=
       eout ← io.fs.read_to_end child2.stdout,
       io.fs.close child2.stdout,
       eres ← io.proc.wait child2,
+      debug_ln ("output: " ++ eout.to_string),
       let eoutn := (string.to_nat eout.to_string),
       if refines final_st eoutn eres then do
-        io.print_ln "SUCCESS",
+        debug_ln "SUCCESS",
         return (tt, g)
       else do
-        io.print_ln "FAIL",
+        debug_ln "FAIL",
         return (ff, g)
     else do
       return (ff, g)
   end
 
-def run_test_n (clangpath:string): nat → std_gen → io unit
+def run_test_n (clangpath:string) (verbose:bool): nat → std_gen → io unit
 | 0 g := (return ())
 | (nat.succ n') g :=
   do
-  (success, g) ← run_test clangpath g,
+  (success, g) ← run_test clangpath verbose g,
   if success then
     run_test_n n' g
   else
@@ -443,13 +449,13 @@ def run_test_n (clangpath:string): nat → std_gen → io unit
 
 meta def main : io unit :=
   let failmsg:io unit := do
-      io.print_ln "irtest_run.lean <itrcnt> <clang path>" in
+      io.print_ln "irtest_run.lean <itrcnt> <clang path> <verbose(y/n)>" in
   do
   args ← io.cmdline_args,
   match args with
-  | cnt::clangpath::_ :=
+  | cnt::clangpath::verbose::_ :=
     let g := mk_std_gen in
-    do run_test_n clangpath cnt.to_nat g,
+    do run_test_n clangpath (verbose = "y") cnt.to_nat g,
     return ()
   | _ := failmsg
   end
