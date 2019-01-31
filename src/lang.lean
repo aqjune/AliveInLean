@@ -52,8 +52,8 @@ def bop_availflags : bopcode → list bopflag
 | bopcode.shl := [bopflag.nsw, bopflag.nuw]
 | bopcode.udiv := [bopflag.exact]
 | bopcode.sdiv := [bopflag.exact]
-| bopcode.urem := [bopflag.exact]
-| bopcode.srem := [bopflag.exact]
+| bopcode.urem := []
+| bopcode.srem := []
 | bopcode.lshr := [bopflag.exact]
 | bopcode.ashr := [bopflag.exact]
 | bopcode.and := []
@@ -69,11 +69,12 @@ inductive uopcode : Type
 | freeze | zext | sext | trunc
 
 -- instruction
+-- TODO: the order of parameters should be consistent
 inductive instruction : Type
 -- binop: operations in https://github.com/nunoplopes/alive/blob/newsema/language.py#L278
 | binop : ty → reg → bopcode → list bopflag →
           operand → operand → instruction
-| icmpop : ty → reg → icmpcond → operand →
+| icmpop : ty → reg → icmpcond → operand → -- opty, lhs, cond, op1, op2
            operand → instruction
 | selectop : reg → ty → operand → ty → operand → -- condty, opty
              operand → instruction
