@@ -68,7 +68,7 @@ def ir_middle := "
 
 declare i32 @printf(i8* nocapture readonly, ...)
 
-@.str = private unnamed_addr constant [4 x i8] c\"%ld\\00\", align 1
+@.str = private unnamed_addr constant [4 x i8] c\"%lu\\00\", align 1
 "
 
 -- This function is used to resolve type class instance resolution
