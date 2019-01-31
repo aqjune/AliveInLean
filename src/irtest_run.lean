@@ -347,8 +347,26 @@ def assign_constants (insts:list instruction) (g:std_gen)
       return (insts, g)
     ) (insts, g) vr.1
 
+def exec_extension := ".exe"
+
+def refines (final_st: irsem.irstate irsem_exec) (n:nat): bool :=
+  if irsem.irstate.getub irsem_exec final_st = ff then
+    tt -- it is already UB
+  else
+    let v := irsem.irstate.getreg irsem_exec final_st "%res" in
+    match v with
+    | none := sorry
+    | some v :=
+      match v with
+      | irsem.valty.ival sz i p :=
+        if p = ff then
+          tt -- it is already poison
+        else i.val = n
+      end
+    end
+
 -- Runs a single test.
-def run_test (g:std_gen): io std_gen :=
+def run_test (clangpath:string) (g:std_gen): io (bool × std_gen) :=
   do
   io.print_ln "---------------",
   let (retty, g) := ty_new g,
@@ -368,19 +386,55 @@ def run_test (g:std_gen): io std_gen :=
   -- Get the result of it from Lean's semantics.
   io.print_ln "- Final state",
   final_st ← print_result (irsem.bigstep_exe irsem_exec init_st ⟨insts⟩),
+  match final_st with
+  | none := do
+    io.print_ln "STUCK?",
+    return (ff, g)
+  | some final_st := do
+    -- Generate LLVM IR
+    let ircode := to_llvmir ⟨insts⟩ init_st freevars retty,
+    io.print_ln "- LLVM IR",
+    io.print_ln ircode,
+    -- store it to a temporary file
+    let (tempn, g) := std_next g,
+    let tempname := to_string (tempn % 10000),
+    handler ← io.mk_file_handle (tempname ++ ".ll") (io.mode.write) ff,
+    io.fs.write handler (ircode.to_list.to_buffer),
+    io.fs.close handler,
+    child ← io.proc.spawn {
+      cmd := clangpath,
+      args := ["-o", (tempname ++ exec_extension), (tempname ++ ".ll")]
+    },
+    cres ← io.proc.wait child,
+    if cres = 0 then do
+      -- compilation succeeded.
+      child2 ← io.proc.spawn {
+        cmd := tempname ++ exec_extension,
+        args := [],
+        stdout := io.process.stdio.piped
+      },
+      eres ← io.fs.read_to_end child2.stdout,
+      let eresn := (string.to_nat eres.to_string),
+      if refines final_st eresn then do
+        io.print_ln "SUCCESS",
+        return (tt, g)
+      else do
+        io.print_ln "FAIL",
+        return (ff, g)
+    else do
+      return (ff, g)
+  end
 
-  -- Generate LLVM IR
-  let ircode := to_llvmir ⟨insts⟩ init_st freevars retty,
-  io.print_ln "- LLVM IR",
-  io.print_ln ircode,
-  return g
-
-def run_test_n: nat → std_gen → io unit
+def run_test_n (clangpath:string): nat → std_gen → io unit
 | 0 g := (return ())
 | (nat.succ n') g :=
   do
-  g ← run_test g,
-  run_test_n n' g
+  (success, g) ← run_test clangpath g,
+  if success then
+    run_test_n n' g
+  else
+    -- stop!
+    return ()
 
 
 meta def main : io unit :=
@@ -389,11 +443,9 @@ meta def main : io unit :=
   do
   args ← io.cmdline_args,
   match args with
-  | cnt::clangpath_ :=
+  | cnt::clangpath::_ :=
     let g := mk_std_gen in
-    do run_test_n cnt.to_nat g,
+    do run_test_n clangpath cnt.to_nat g,
     return ()
   | _ := failmsg
   end
-
---#eval run_test_n 30 (mk_std_gen)
