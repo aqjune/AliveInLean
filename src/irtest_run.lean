@@ -386,7 +386,8 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
   -- Create a random initial state
   let (init_st, g) := freevar.create_init_state_exec freevars g,
   debug_ln "- Initial state",
-  debug_ln (to_string init_st),
+  let init_st_str := to_string init_st,
+  debug_ln init_st_str,
 
   -- Get the result of it from Lean's semantics.
   debug_ln "- Final state",
@@ -429,9 +430,16 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
         debug_ln "SUCCESS",
         return (tt, g)
       else do
-        debug_ln "FAIL",
+        io.print_ln "TEST FAIL!",
+        monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
+        io.print_ln ("RESULT: " ++ init_st_str),
+        io.print_ln ("FILE: " ++ tempname ++ ".ll/exec"),
         return (ff, g)
     else do
+      io.print_ln "TEST FAIL!",
+      monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
+      io.print_ln ("RESULT: " ++ init_st_str),
+      io.print_ln ("FILE: " ++ tempname ++ ".ll/exec"),
       return (ff, g)
   end
 
