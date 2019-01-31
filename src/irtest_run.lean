@@ -25,18 +25,6 @@ def any_const (t:ty) (g:std_gen): nat × std_gen :=
     end in
   (const, g)
 
--- Runs bigstep with given semantics.
-def print_result {α:Type} [has_to_string α] (result_state:option α)
-  : io (option α) :=
-  match result_state with
-  | none := do
-    io.print_ln "Stuck",
-    return none
-  | some finalresult := do
-    io.print_ln (finalresult),
-    return (some finalresult)
-  end
-
 -- A few utility functions
 def powerset {α: Type} : list α → list (list α)
 | [h] := [[],[h]]
@@ -64,6 +52,9 @@ def uops: list uopcode :=
 -- Possible integer type sizes.
 @[simp]
 def ISZ_LIST := [1, 4, 8, 16, 32, 64]
+
+-- The number of instructions in a program
+def NUM_INSTS := 5
 
 -- Conversion from a program to a full LLVM IR program
 def ir_header := "
@@ -377,7 +368,7 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
   let (retty, g) := ty_new g,
   -- Create random instructions
   let ((insts, g), vr) :=
-      (do (insts, g) ← rand_instlist 5 retty "%res" g,
+      (do (insts, g) ← rand_instlist NUM_INSTS retty "%res" g,
           assign_constants insts g).run vars_record_empty,
   let freevars := vr.1.reverse,
   -- Print the instructions.
@@ -391,12 +382,14 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
 
   -- Get the result of it from Lean's semantics.
   debug_ln "- Final state",
-  final_st ← print_result (irsem.bigstep_exe irsem_exec init_st ⟨insts⟩),
+  let final_st := irsem.bigstep_exe irsem_exec init_st ⟨insts⟩,
   match final_st with
   | none := do
-    debug_ln "Unreachable!",
+    io.print_ln "UNREACHABLE!",
+    io.print_ln ("INITIAL STATE: " ++ init_st_str),
     return (ff, g)
   | some final_st := do
+    let final_st_str := to_string final_st,
     -- Generate LLVM IR
     let ircode := to_llvmir ⟨insts⟩ init_st freevars retty,
     debug_ln "- LLVM IR",
@@ -432,13 +425,15 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
       else do
         io.print_ln "TEST FAIL!",
         monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
-        io.print_ln ("RESULT: " ++ init_st_str),
+        io.print_ln ("INITIAL STATE: " ++ init_st_str),
+        io.print_ln ("FINAL STATE: " ++ final_st_str),
         io.print_ln ("FILE: " ++ tempname ++ ".ll/exec"),
         return (ff, g)
     else do
       io.print_ln "TEST FAIL!",
       monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
-      io.print_ln ("RESULT: " ++ init_st_str),
+      io.print_ln ("INITIAL STATE: " ++ init_st_str),
+      io.print_ln ("FINAL STATE: " ++ final_st_str),
       io.print_ln ("FILE: " ++ tempname ++ ".ll/exec"),
       return (ff, g)
   end
@@ -447,6 +442,9 @@ def run_test_n (clangpath:string) (verbose:bool): nat → std_gen → io unit
 | 0 g := (return ())
 | (nat.succ n') g :=
   do
+  if n' % 100 = 0 then
+    io.print_ln ("-------" ++ (to_string n') ++ "-------")
+  else return (),
   (success, g) ← run_test clangpath verbose g,
   if success then
     run_test_n n' g
