@@ -396,21 +396,23 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
     debug_ln ircode,
     -- store it to a temporary file
     let (tempn, g) := std_next g,
-    let tempname := to_string (tempn % 10000),
-    handler ← io.mk_file_handle (tempname ++ ".ll") (io.mode.write) ff,
+    let tempname := to_string (tempn % 10000000),
+    let llname := "./tmp/" ++ tempname ++ ".ll",
+    let execname := "./tmp/" ++ tempname ++ exec_extension,
+    handler ← io.mk_file_handle llname (io.mode.write) ff,
     io.fs.write handler (ircode.to_list.to_buffer),
     io.fs.close handler,
     child ← io.proc.spawn {
       cmd := clangpath,
-      args := ["-o", (tempname ++ exec_extension),
+      args := ["-o", execname,
         "-Wno-override-module", -- suppress warning
-        (tempname ++ ".ll")]
+        llname]
     },
     cres ← io.proc.wait child,
     if cres = 0 then do
       -- compilation succeeded.
       child2 ← io.proc.spawn {
-        cmd := "./" ++ tempname ++ exec_extension,
+        cmd := execname,
         args := [],
         stdout := io.process.stdio.piped
       },
@@ -427,14 +429,14 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
         monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
         io.print_ln ("INITIAL STATE: " ++ init_st_str),
         io.print_ln ("FINAL STATE: " ++ final_st_str),
-        io.print_ln ("FILE: " ++ tempname ++ ".ll/exec"),
+        io.print_ln ("FILE: " ++ llname ++ " , " ++ execname),
         return (ff, g)
     else do
       io.print_ln "TEST FAIL!",
       monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
       io.print_ln ("INITIAL STATE: " ++ init_st_str),
       io.print_ln ("FINAL STATE: " ++ final_st_str),
-      io.print_ln ("FILE: " ++ tempname ++ ".ll/exec"),
+        io.print_ln ("FILE: " ++ llname ++ " , " ++ execname),
       return (ff, g)
   end
 
