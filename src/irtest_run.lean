@@ -349,9 +349,11 @@ def assign_constants (insts:list instruction) (g:std_gen)
 
 def exec_extension := ".exe"
 
-def refines (final_st: irsem.irstate irsem_exec) (n:nat): bool :=
+def refines (final_st: irsem.irstate irsem_exec) (n exitcode:nat): bool :=
   if irsem.irstate.getub irsem_exec final_st = ff then
     tt -- it is already UB
+  else if exitcode ≠ 0 then
+    ff -- abnormal exit
   else
     let v := irsem.irstate.getreg irsem_exec final_st "%res" in
     match v with
@@ -409,13 +411,15 @@ def run_test (clangpath:string) (g:std_gen): io (bool × std_gen) :=
     if cres = 0 then do
       -- compilation succeeded.
       child2 ← io.proc.spawn {
-        cmd := tempname ++ exec_extension,
+        cmd := "./" ++ tempname ++ exec_extension,
         args := [],
         stdout := io.process.stdio.piped
       },
-      eres ← io.fs.read_to_end child2.stdout,
-      let eresn := (string.to_nat eres.to_string),
-      if refines final_st eresn then do
+      eout ← io.fs.read_to_end child2.stdout,
+      io.fs.close child2.stdout,
+      eres ← io.proc.wait child2,
+      let eoutn := (string.to_nat eout.to_string),
+      if refines final_st eoutn eres then do
         io.print_ln "SUCCESS",
         return (tt, g)
       else do
