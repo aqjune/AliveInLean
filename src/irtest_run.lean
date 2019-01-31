@@ -25,18 +25,6 @@ def any_const (t:ty) (g:std_gen): nat × std_gen :=
     end in
   (const, g)
 
--- Runs bigstep with given semantics.
-def print_result {α:Type} [has_to_string α] (result_state:option α)
-  : io (option α) :=
-  match result_state with
-  | none := do
-    io.print_ln "Stuck",
-    return none
-  | some finalresult := do
-    io.print_ln (finalresult),
-    return (some finalresult)
-  end
-
 -- A few utility functions
 def powerset {α: Type} : list α → list (list α)
 | [h] := [[],[h]]
@@ -65,6 +53,9 @@ def uops: list uopcode :=
 @[simp]
 def ISZ_LIST := [1, 4, 8, 16, 32, 64]
 
+-- The number of instructions in a program
+def NUM_INSTS := 5
+
 -- Conversion from a program to a full LLVM IR program
 def ir_header := "
 define i32 @main() {
@@ -77,7 +68,7 @@ def ir_middle := "
 
 declare i32 @printf(i8* nocapture readonly, ...)
 
-@.str = private unnamed_addr constant [4 x i8] c\"%ld\\00\", align 1
+@.str = private unnamed_addr constant [4 x i8] c\"%lu\\00\", align 1
 "
 
 -- This function is used to resolve type class instance resolution
@@ -210,7 +201,7 @@ def rand_selectop (retty:ty) (retvar:string) (g:std_gen)
 : vars_state (instruction × std_gen) :=
 do
   -- choose operand 1
-  (varname1, varty1, isfresh1, g) ← choose_or_newvar none g,
+  (varname1, varty1, isfresh1, g) ← choose_or_newvar retty g,
   -- choose operand 2
   -- operand 1 and 2 should have the same type
   (varname2, varty2, isfresh2, g) ← choose_or_newvar varty1 g,
@@ -347,53 +338,132 @@ def assign_constants (insts:list instruction) (g:std_gen)
       return (insts, g)
     ) (insts, g) vr.1
 
+def exec_extension := ".exe"
+
+def refines (final_st: irsem.irstate irsem_exec) (n exitcode:nat): bool :=
+  if irsem.irstate.getub irsem_exec final_st = ff then
+    tt -- it is already UB
+  else if exitcode ≠ 0 then
+    ff -- abnormal exit
+  else
+    let v := irsem.irstate.getreg irsem_exec final_st "%res" in
+    match v with
+    | none := sorry
+    | some v :=
+      match v with
+      | irsem.valty.ival sz i p :=
+        if p = ff then
+          tt -- it is already poison
+        else i.val = n
+      end
+    end
+
 -- Runs a single test.
-def run_test (g:std_gen): io std_gen :=
+def run_test (clangpath:string) (verbose:bool) (g:std_gen)
+: io (bool × std_gen) :=
+  let debug_ln (s:string):=
+    if verbose then io.print_ln s else return () in
   do
-  io.print_ln "---------------",
+  debug_ln "---------------",
   let (retty, g) := ty_new g,
   -- Create random instructions
   let ((insts, g), vr) :=
-      (do (insts, g) ← rand_instlist 5 retty "%res" g,
+      (do (insts, g) ← rand_instlist NUM_INSTS retty "%res" g,
           assign_constants insts g).run vars_record_empty,
   let freevars := vr.1.reverse,
   -- Print the instructions.
-  monad.foldl (λ _ inst, io.print_ln (to_string inst)) () insts,
+  monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
 
   -- Create a random initial state
   let (init_st, g) := freevar.create_init_state_exec freevars g,
-  io.print_ln "- Initial state",
-  io.print_ln (to_string init_st),
+  debug_ln "- Initial state",
+  let init_st_str := to_string init_st,
+  debug_ln init_st_str,
 
   -- Get the result of it from Lean's semantics.
-  io.print_ln "- Final state",
-  final_st ← print_result (irsem.bigstep_exe irsem_exec init_st ⟨insts⟩),
+  debug_ln "- Final state",
+  let final_st := irsem.bigstep_exe irsem_exec init_st ⟨insts⟩,
+  match final_st with
+  | none := do
+    io.print_ln "UNREACHABLE!",
+    io.print_ln ("INITIAL STATE: " ++ init_st_str),
+    return (ff, g)
+  | some final_st := do
+    let final_st_str := to_string final_st,
+    -- Generate LLVM IR
+    let ircode := to_llvmir ⟨insts⟩ init_st freevars retty,
+    debug_ln "- LLVM IR",
+    debug_ln ircode,
+    -- store it to a temporary file
+    let (tempn, g) := std_next g,
+    let tempname := to_string (tempn % 10000000),
+    let llname := "./tmp/" ++ tempname ++ ".ll",
+    let execname := "./tmp/" ++ tempname ++ exec_extension,
+    handler ← io.mk_file_handle llname (io.mode.write) ff,
+    io.fs.write handler (ircode.to_list.to_buffer),
+    io.fs.close handler,
+    child ← io.proc.spawn {
+      cmd := clangpath,
+      args := ["-o", execname,
+        "-Wno-override-module", -- suppress warning
+        llname]
+    },
+    cres ← io.proc.wait child,
+    if cres = 0 then do
+      -- compilation succeeded.
+      child2 ← io.proc.spawn {
+        cmd := execname,
+        args := [],
+        stdout := io.process.stdio.piped
+      },
+      eout ← io.fs.read_to_end child2.stdout,
+      io.fs.close child2.stdout,
+      eres ← io.proc.wait child2,
+      debug_ln ("output: " ++ eout.to_string),
+      let eoutn := (string.to_nat eout.to_string),
+      if refines final_st eoutn eres then do
+        debug_ln "SUCCESS",
+        return (tt, g)
+      else do
+        io.print_ln "TEST FAIL!",
+        monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
+        io.print_ln ("INITIAL STATE: " ++ init_st_str),
+        io.print_ln ("FINAL STATE: " ++ final_st_str),
+        io.print_ln ("FILE: " ++ llname ++ " , " ++ execname),
+        return (ff, g)
+    else do
+      io.print_ln "TEST FAIL!",
+      monad.foldl (λ _ inst, debug_ln (to_string inst)) () insts,
+      io.print_ln ("INITIAL STATE: " ++ init_st_str),
+      io.print_ln ("FINAL STATE: " ++ final_st_str),
+        io.print_ln ("FILE: " ++ llname ++ " , " ++ execname),
+      return (ff, g)
+  end
 
-  -- Generate LLVM IR
-  let ircode := to_llvmir ⟨insts⟩ init_st freevars retty,
-  io.print_ln "- LLVM IR",
-  io.print_ln ircode,
-  return g
-
-def run_test_n: nat → std_gen → io unit
+def run_test_n (clangpath:string) (verbose:bool): nat → std_gen → io unit
 | 0 g := (return ())
 | (nat.succ n') g :=
   do
-  g ← run_test g,
-  run_test_n n' g
+  if n' % 100 = 0 then
+    io.print_ln ("-------" ++ (to_string n') ++ "-------")
+  else return (),
+  (success, g) ← run_test clangpath verbose g,
+  if success then
+    run_test_n n' g
+  else
+    -- stop!
+    return ()
 
 
 meta def main : io unit :=
   let failmsg:io unit := do
-      io.print_ln "irtest_run.lean <itrcnt> <clang path>" in
+      io.print_ln "irtest_run.lean <itrcnt> <clang path> <verbose(y/n)>" in
   do
   args ← io.cmdline_args,
   match args with
-  | cnt::clangpath_ :=
+  | cnt::clangpath::verbose::_ :=
     let g := mk_std_gen in
-    do run_test_n cnt.to_nat g,
+    do run_test_n clangpath (verbose = "y") cnt.to_nat g,
     return ()
   | _ := failmsg
   end
-
---#eval run_test_n 30 (mk_std_gen)
