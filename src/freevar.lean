@@ -203,7 +203,7 @@ namespace env
     sbool.ult (replace_sbv η x) (replace_sbv η y)
   | η x := x
 
-  @[simp]
+  @[simp, reducible]
   def replace_valty (η:env) (v:irsem.valty irsem_smt) :=
     match v with
     | irsem.valty.ival sz i p :=

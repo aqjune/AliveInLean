@@ -201,13 +201,13 @@ lemma closed_bv_var_add2: ∀ (η:freevar.env) sz v (s:string),
   closed_bv ((η.add_bv s v)⟦sbitvec.var sz s⟧)
 := begin
   unfold env.add_bv,
-  unfold freevar.env.replace_sbv,
-  simp,
   intros,
   generalize Hb': (η.b s) = b',
   unfold closed_bv,
-  intros, cases v; unfold sbitvec.of_int;
-  unfold freevar.env.replace_sbv
+  intros, cases v;
+  unfold freevar.env.replace_sbv; simp,
+  { unfold sbitvec.of_int, unfold env.replace_sbv },
+  { unfold sbitvec.of_int, unfold env.replace_sbv },
 end
 
 lemma ival_closed: ∀ sz vn pn (η:freevar.env) z b,
