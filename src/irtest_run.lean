@@ -339,8 +339,8 @@ def canonicalize_freevars
       if should_cast v.2 then
         let newty := canonicalize v.2 in
         do newv ← fv_new newty,
-          let i := instruction.unaryop (reg.r newv) uopcode.trunc newty
-                    (operand.reg (reg.r v.1)) v.2,
+          let i := instruction.unaryop (reg.r v.1) uopcode.trunc newty
+                    (operand.reg (reg.r newv)) v.2,
           fv_remove v.1,
           return (i::previnsts)
       else return previnsts)
@@ -417,6 +417,7 @@ def run_test (clangpath:string) (verbose:bool) (g:std_gen)
   match final_st with
   | none := do
     io.print_ln "UNREACHABLE!",
+    io.print_ln (to_string insts),
     io.print_ln ("INITIAL STATE: " ++ init_st_str),
     return (ff, g)
   | some final_st := do
