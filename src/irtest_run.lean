@@ -341,6 +341,7 @@ def canonicalize_freevars
         do newv ← fv_new newty,
           let i := instruction.unaryop (reg.r newv) uopcode.trunc newty
                     (operand.reg (reg.r v.1)) v.2,
+          fv_remove v.1,
           return (i::previnsts)
       else return previnsts)
       [] (vr.freevars),
