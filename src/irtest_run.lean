@@ -339,8 +339,8 @@ def canonicalize_freevars
       if should_cast v.2 then
         let newty := canonicalize v.2 in
         do newv ← fv_new newty,
-          let i := instruction.unaryop (reg.r newv) uopcode.trunc v.2
-                    (operand.reg (reg.r v.1)) newty,
+          let i := instruction.unaryop (reg.r newv) uopcode.trunc newty
+                    (operand.reg (reg.r v.1)) v.2,
           return (i::previnsts)
       else return previnsts)
       [] (vr.freevars),
